@@ -380,30 +380,36 @@ func getStatus(window string, panePID int, childMap map[int][]int) string {
 
 	descendants := collectDescendants(agentPID, childMap)
 
-	var childNames []string
+	var childSignals []string
 	for _, d := range descendants {
-		name := readComm(d)
-		if name == "" || name == "node" || name == "claude" || name == "codex" {
+		comm := strings.ToLower(readComm(d))
+		cmdline := strings.ToLower(readCmdline(d))
+		if isAgentLikeProcess(comm, cmdline) {
 			continue
 		}
-		childNames = append(childNames, name)
+		signal := cmdline
+		if signal == "" {
+			signal = comm
+		}
+		if signal == "" {
+			continue
+		}
+		childSignals = append(childSignals, signal)
 	}
 
-	if len(childNames) > 0 {
-		childStatus := classifyChildren(childNames)
+	if len(childSignals) > 0 {
+		childStatus := classifyChildren(childSignals)
 		if childStatus == "⚙️" {
-			// Generic subprocess is often less informative than current pane state.
-			// Prefer active/attention states when they are visible in the pane.
-			if isPaneActive(window) {
-				return prefix + "🧠"
-			}
-			if paneNeedsAttention(window) {
-				return prefix + "💤"
-			}
+			// Unknown live child process still means active work.
+			return prefix + "🧠"
 		}
 		return prefix + childStatus
 	}
 
+	// If no child process is active, prompt means idle/waiting.
+	if paneNeedsAttention(window) {
+		return prefix + "💤"
+	}
 	if isPaneActive(window) {
 		return prefix + "🧠"
 	}
@@ -612,7 +618,11 @@ func readComm(pid int) string {
 func classifyChildren(names []string) string {
 	joined := strings.ToLower(strings.Join(names, "\n"))
 
-	if containsAny(joined, "make", "gcc", "g++", "cc1", "rustc", "javac", "tsc", "webpack", "vite", "esbuild", "rollup") {
+	if containsAny(
+		joined,
+		"make", "gcc", "g++", "cc1", "rustc", "javac", "tsc", "webpack", "vite", "esbuild", "rollup",
+		"coordinator/cli.ts build", " next build", "npm run build", "pnpm run build", "yarn build", "go build", "cargo build",
+	) {
 		return "🔨"
 	}
 	if containsAny(joined, "jest", "vitest", "pytest", "mocha", "phpunit", "rspec") {
@@ -628,6 +638,21 @@ func classifyChildren(names []string) string {
 		return "🌐"
 	}
 	return "⚙️"
+}
+
+func isAgentLikeProcess(comm, cmdline string) bool {
+	if comm == "" && cmdline == "" {
+		return true
+	}
+	if strings.Contains(comm, "codex") || strings.Contains(comm, "claude") || comm == "node" {
+		if cmdline == "" || strings.Contains(cmdline, "codex") || strings.Contains(cmdline, "claude") {
+			return true
+		}
+	}
+	if strings.Contains(cmdline, "codex") || strings.Contains(cmdline, "claude") {
+		return true
+	}
+	return false
 }
 
 func containsAny(s string, substrs ...string) bool {

@@ -50,12 +50,36 @@ func TestClassifyChildren(t *testing.T) {
 		{[]string{"rustc", "cargo"}, "🔨"},
 		{[]string{"git", "curl"}, "🔀"},
 		{[]string{"GCC"}, "🔨"},
+		{[]string{"node coordinator/cli.ts build --wait"}, "🔨"},
 	}
 	for _, tt := range tests {
 		t.Run(strings.Join(tt.names, "+"), func(t *testing.T) {
 			got := classifyChildren(tt.names)
 			if got != tt.want {
 				t.Errorf("classifyChildren(%v) = %q, want %q", tt.names, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsAgentLikeProcess(t *testing.T) {
+	tests := []struct {
+		name    string
+		comm    string
+		cmdline string
+		want    bool
+	}{
+		{"codex thread", "codex", "", true},
+		{"codex binary", "MainThread", "/usr/bin/codex --dangerously-bypass-approvals-and-sandbox", true},
+		{"claude binary", "MainThread", "/usr/bin/claude", true},
+		{"plain node worker", "node", "node coordinator/cli.ts build --wait", false},
+		{"non-agent comm", "psql", "/usr/lib/postgresql/16/bin/psql ...", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isAgentLikeProcess(tt.comm, tt.cmdline); got != tt.want {
+				t.Errorf("isAgentLikeProcess(%q, %q) = %v, want %v", tt.comm, tt.cmdline, got, tt.want)
 			}
 		})
 	}
