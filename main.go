@@ -42,9 +42,10 @@ func main() {
 }
 
 type paneInfo struct {
-	window  string
-	pid     int
-	focused bool
+	window   string
+	pid      int
+	focused  bool
+	activity bool
 }
 
 // Unread tracking: detect when agent finishes work while user isn't looking.
@@ -55,7 +56,7 @@ var (
 
 func listPanes() []paneInfo {
 	out, err := exec.Command("tmux", "list-panes", "-a",
-		"-F", "#{session_name}:#{window_index} #{pane_pid} #{window_active}").Output()
+		"-F", "#{session_name}:#{window_index} #{pane_pid} #{window_active} #{window_activity_flag}").Output()
 	if err != nil {
 		return nil
 	}
@@ -63,14 +64,19 @@ func listPanes() []paneInfo {
 	sc := bufio.NewScanner(strings.NewReader(string(out)))
 	for sc.Scan() {
 		fields := strings.Fields(sc.Text())
-		if len(fields) < 3 {
+		if len(fields) < 4 {
 			continue
 		}
 		pid, err := strconv.Atoi(fields[1])
 		if err != nil {
 			continue
 		}
-		panes = append(panes, paneInfo{window: fields[0], pid: pid, focused: fields[2] == "1"})
+		panes = append(panes, paneInfo{
+			window:   fields[0],
+			pid:      pid,
+			focused:  fields[2] == "1",
+			activity: fields[3] == "1",
+		})
 	}
 	return panes
 }
@@ -86,8 +92,9 @@ func updateAllPanes() {
 
 	// Group panes by window — pick the most significant status per window.
 	type windowSummary struct {
-		status  string
-		focused bool
+		status   string
+		focused  bool
+		activity bool
 	}
 	summaries := make(map[string]*windowSummary)
 
@@ -96,9 +103,10 @@ func updateAllPanes() {
 		rawStatus := getStatus(p.window, p.pid, childMap)
 		prev, exists := summaries[p.window]
 		if !exists {
-			summaries[p.window] = &windowSummary{status: rawStatus, focused: p.focused}
+			summaries[p.window] = &windowSummary{status: rawStatus, focused: p.focused, activity: p.activity}
 		} else {
 			prev.focused = prev.focused || p.focused
+			prev.activity = prev.activity || p.activity
 			if statusPriority(rawStatus) > statusPriority(prev.status) {
 				prev.status = rawStatus
 			}
@@ -112,8 +120,8 @@ func updateAllPanes() {
 		wasWorking := windowWasWorking[window]
 		isWorking := isWorkingStatus(rawStatus)
 
-		// Transition: working → idle while unfocused → mark unread
-		if wasWorking && !isWorking && !focused && rawStatus != "" {
+		// Transition: working → idle while unfocused OR tmux reports unseen activity.
+		if (wasWorking || s.activity) && !isWorking && !focused && rawStatus != "" {
 			markUnread(window)
 		}
 		// User focused the window → clear unread
@@ -318,11 +326,15 @@ func getStatus(window string, panePID int, childMap map[int][]int) string {
 
 	if len(childNames) > 0 {
 		childStatus := classifyChildren(childNames)
-		// Codex/Claude can have long-lived helper/background children.
-		// If status would be generic "⚙️" but pane is clearly waiting for input,
-		// show idle so unread/attention state can surface.
-		if childStatus == "⚙️" && paneNeedsAttention(window) {
-			return prefix + "💤"
+		if childStatus == "⚙️" {
+			// Generic subprocess is often less informative than current pane state.
+			// Prefer active/attention states when they are visible in the pane.
+			if isPaneActive(window) {
+				return prefix + "🧠"
+			}
+			if paneNeedsAttention(window) {
+				return prefix + "💤"
+			}
 		}
 		return prefix + childStatus
 	}
