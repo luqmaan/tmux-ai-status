@@ -99,13 +99,15 @@ After=default.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/tmux-ai-status-bin
+ExecStart=%h/.local/bin/tmux-ai-status
 Restart=always
 RestartSec=2
 
 [Install]
 WantedBy=default.target
 ```
+
+If your local binary name is different (for example `tmux-ai-status-bin`), update `ExecStart` accordingly.
 
 Enable + start:
 
