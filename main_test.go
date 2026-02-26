@@ -686,10 +686,24 @@ func TestShouldMarkUnread(t *testing.T) {
 			want:        true,
 		},
 		{
-			name:       "first baseline prompt should not mark unread",
+			name:       "first baseline prompt with text marks unread",
 			seenBefore: false,
 			rawStatus:  "x 💤",
 			promptSig:  "codex:› Explain this codebase",
+			want:       true,
+		},
+		{
+			name:       "first baseline bare prompt stays read",
+			seenBefore: false,
+			rawStatus:  "x 💤",
+			promptSig:  "codex:›",
+			want:       false,
+		},
+		{
+			name:       "first baseline bare claude prompt stays read",
+			seenBefore: false,
+			rawStatus:  "c 💤",
+			promptSig:  "claude:❯",
 			want:       false,
 		},
 		{

@@ -302,13 +302,31 @@ func shouldMarkUnread(
 		return true
 	}
 	if !seenBefore {
-		return false
+		// First baseline should stay read for bare prompts, but explicit
+		// prompt text ("› Run /review...") indicates immediate attention.
+		return hasPromptText(promptSig)
 	}
 	if doneSig != "" && doneSig != prevDoneSig {
 		return true
 	}
 	if promptSig != "" && promptSig != prevPromptSig {
 		return true
+	}
+	return false
+}
+
+func hasPromptText(promptSig string) bool {
+	if promptSig == "" {
+		return false
+	}
+
+	if strings.HasPrefix(promptSig, "codex:") {
+		p := strings.TrimSpace(strings.TrimPrefix(promptSig, "codex:"))
+		return p != "" && p != "›"
+	}
+	if strings.HasPrefix(promptSig, "claude:") {
+		p := strings.TrimSpace(strings.TrimPrefix(promptSig, "claude:"))
+		return p != "" && p != "❯"
 	}
 	return false
 }
