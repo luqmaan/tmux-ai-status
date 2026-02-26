@@ -139,6 +139,21 @@ The suite includes regressions for:
 - process-first classification,
 - unread transition rules.
 
+## Monorepo Publishing
+
+If this project lives inside a larger monorepo, publish only `tmux-ai-status/` using subtree split:
+
+```bash
+# from monorepo root
+bash scripts/publish-tmux-ai-status.sh
+```
+
+The helper script:
+- runs a heuristic secret scan on `tmux-ai-status/`,
+- creates `OWNER/tmux-ai-status` on GitHub if missing,
+- splits history with `git subtree split --prefix=tmux-ai-status`,
+- pushes to `main` on the public repo.
+
 ## Uninstall
 
 ```bash

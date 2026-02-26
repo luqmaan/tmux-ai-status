@@ -1,1 +1,5 @@
 tmux-ai-status
+tmux-ai-status-bin
+.env
+.env.*
+*.log
