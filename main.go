@@ -423,8 +423,11 @@ func getStatus(window string, panePID int, childMap map[int][]int, paneCache map
 	if len(childSignals) > 0 {
 		childStatus := classifyChildren(childSignals)
 		if childStatus == "⚙️" {
-			// Unknown live child process still means active work.
-			return prefix + "🧠"
+			return unknownChildStatus(
+				prefix,
+				isPaneActive(window, paneCache),
+				paneNeedsAttention(window, paneCache),
+			)
 		}
 		return prefix + childStatus
 	}
@@ -437,6 +440,18 @@ func getStatus(window string, panePID int, childMap map[int][]int, paneCache map
 		return prefix + "🧠"
 	}
 	return prefix + "💤"
+}
+
+func unknownChildStatus(prefix string, paneActive, needsAttention bool) string {
+	// Unknown child + visible prompt usually means background terminal
+	// or stale helper process; prefer attention/idle semantics.
+	if needsAttention {
+		return prefix + "💤"
+	}
+	if paneActive {
+		return prefix + "🧠"
+	}
+	return prefix + "⚙️"
 }
 
 func paneNeedsAttention(window string, paneCache map[string]*paneCapture) bool {

@@ -85,6 +85,28 @@ func TestIsAgentLikeProcess(t *testing.T) {
 	}
 }
 
+func TestUnknownChildStatus(t *testing.T) {
+	tests := []struct {
+		name           string
+		prefix         string
+		paneActive     bool
+		needsAttention bool
+		want           string
+	}{
+		{"attention beats active", "x ", true, true, "x 💤"},
+		{"active without attention", "x ", true, false, "x 🧠"},
+		{"idle unknown child", "x ", false, false, "x ⚙️"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := unknownChildStatus(tt.prefix, tt.paneActive, tt.needsAttention)
+			if got != tt.want {
+				t.Errorf("unknownChildStatus() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestContainsAny(t *testing.T) {
 	if !containsAny("hello world", "hello") {
 		t.Error("should contain hello")
