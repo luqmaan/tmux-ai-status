@@ -460,21 +460,23 @@ func isPaneActive(window string) bool {
 func classifyPaneContent(content string) bool {
 	lines := strings.Split(content, "\n")
 	checked := 0
-	for i := len(lines) - 1; i >= 0 && checked < 12; i-- {
+	for i := len(lines) - 1; i >= 0 && checked < 4; i-- {
 		line := strings.TrimSpace(lines[i])
 		if line == "" {
 			continue
 		}
 		checked++
 
-		if strings.Contains(line, "esc to interrupt") {
-			return true
+		// Prompt with concrete text means we're waiting for user input now.
+		// Ignore older spinner lines above it.
+		if isPromptWithText(line) {
+			return false
 		}
-		if !hasSpinnerMarker(line) {
-			continue
+		// Explicit completion markers mean the run is done.
+		if isCompletionLine(line) {
+			return false
 		}
-		// Claude/Codex spinner verbs: "Thinking…", "Brewing...", "Perusing…", etc.
-		if strings.Contains(line, "ing\u2026") || strings.Contains(line, "ing...") {
+		if hasActiveMarker(line) {
 			return true
 		}
 	}
@@ -487,6 +489,17 @@ func hasSpinnerMarker(line string) bool {
 		strings.HasPrefix(line, "✢ ") ||
 		strings.HasPrefix(line, "✻ ") ||
 		strings.HasPrefix(line, "* ")
+}
+
+func hasActiveMarker(line string) bool {
+	if strings.Contains(line, "esc to interrupt") {
+		return true
+	}
+	if !hasSpinnerMarker(line) {
+		return false
+	}
+	// Claude/Codex spinner verbs: "Thinking…", "Brewing...", "Perusing…", etc.
+	return strings.Contains(line, "ing\u2026") || strings.Contains(line, "ing...")
 }
 
 // classifyPaneNeedsAttention returns true when the pane appears to be
@@ -526,17 +539,27 @@ func classifyPaneCompletionSignature(content string) string {
 			continue
 		}
 		checked++
-		if strings.HasPrefix(line, "─ Worked for ") {
-			return line
-		}
-		if line == "Done." || strings.HasPrefix(line, "Done. ") {
-			return line
-		}
-		if line == "All set." || strings.HasPrefix(line, "All set. ") {
+		if isCompletionLine(line) {
 			return line
 		}
 	}
 	return ""
+}
+
+func isCompletionLine(line string) bool {
+	return strings.HasPrefix(line, "─ Worked for ") ||
+		line == "Done." || strings.HasPrefix(line, "Done. ") ||
+		line == "All set." || strings.HasPrefix(line, "All set. ")
+}
+
+func isPromptWithText(line string) bool {
+	if strings.HasPrefix(line, "›") {
+		return strings.TrimSpace(strings.TrimPrefix(line, "›")) != ""
+	}
+	if strings.HasPrefix(line, "❯") {
+		return strings.TrimSpace(strings.TrimPrefix(line, "❯")) != ""
+	}
+	return false
 }
 
 func findAgent(panePID int, childMap map[int][]int) (int, string) {
