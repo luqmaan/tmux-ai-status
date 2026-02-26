@@ -9,8 +9,8 @@ A lightweight daemon that shows what your AI coding agent (Claude Code, Codex CL
   <em>Live pane activity + unread attention markers, directly in tmux window names.</em>
 </p>
 
-```
-1:x 🧠  2:x 🔨  3:x 💤  4:x 📬  5:zsh
+``` 
+1:x 🧠 promo  2:x 🔨 parser  3:c 📬 auth  4:c 💤 seo  5:zsh
 ```
 
 ## Why I use this
@@ -25,6 +25,14 @@ This tool gives each tab a simple status icon, so I can instantly see:
 - which tab needs my attention.
 
 It works with both Codex and Claude, so I can switch between them and still get the same status system.
+
+### Topic labels (terse)
+
+Each agent tab can show one short topic word after the emoji.
+
+- max length: `8` letters (phone-friendly),
+- inferred from the latest prompt/activity text,
+- omitted when no clear topic is found.
 
 ## Statuses
 

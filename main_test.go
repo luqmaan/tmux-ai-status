@@ -428,6 +428,82 @@ func TestClassifyPaneAttentionSignature(t *testing.T) {
 	}
 }
 
+func TestExtractTopicWord(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want string
+	}{
+		{"slash command", "Run /review on my current changes", "review"},
+		{"hyphenated slash command", "/refresh-cover-images now", "refresh"},
+		{"skip generic verb", "Fix authentication bug in login", "authenti"},
+		{"active filler word", "Thinking...", ""},
+		{"numeric only", "12345", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := extractTopicWord(tt.text); got != tt.want {
+				t.Errorf("extractTopicWord(%q) = %q, want %q", tt.text, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClassifyPaneTopic(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name: "prompt text",
+			content: "Done.\n\n› Run /review on my current changes\n\n" +
+				"  gpt-5.3-codex · 87% left\n",
+			want: "review",
+		},
+		{
+			name: "active line fallback",
+			content: "• Implementing normalization, filtering, and selection logic (2m 23s • esc to interrupt)\n" +
+				"› \n",
+			want: "normaliz",
+		},
+		{
+			name:    "bare prompt has no topic",
+			content: "All set.\n\n❯ \n",
+			want:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyPaneTopic(tt.content); got != tt.want {
+				t.Errorf("classifyPaneTopic(%q) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatStatusWithTopic(t *testing.T) {
+	tests := []struct {
+		name   string
+		status string
+		topic  string
+		want   string
+	}{
+		{"topic appended", "x 🧠", "review", "x 🧠 review"},
+		{"empty status", "", "review", ""},
+		{"empty topic", "x 💤", "", "x 💤"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatStatusWithTopic(tt.status, tt.topic); got != tt.want {
+				t.Errorf("formatStatusWithTopic() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestClassifyPaneActiveSignature(t *testing.T) {
 	content := "Done.\n\n◦ Planning broad tests and monitoring (1m 03s • esc to interrupt)\n› Find and fix a bug in @filename\n"
 	got := classifyPaneActiveSignature(content)

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 var (
@@ -65,6 +66,7 @@ var (
 	windowDoneSig    = make(map[string]string)
 	windowActiveSig  = make(map[string]string)
 	windowActiveAt   = make(map[string]time.Time)
+	windowTopic      = make(map[string]string)
 )
 
 func listPanes() []paneInfo {
@@ -196,6 +198,10 @@ func updateAllPanes() {
 				effectiveStatus = strings.TrimSuffix(rawStatus, "💤") + "📬"
 			}
 		}
+		if effectiveStatus != "" {
+			topic := rememberWindowTopic(window, paneCache)
+			effectiveStatus = formatStatusWithTopic(effectiveStatus, topic)
+		}
 
 		setWindowStatus(window, effectiveStatus)
 	}
@@ -243,6 +249,11 @@ func updateAllPanes() {
 	for w := range windowActiveAt {
 		if !seenWindows[w] {
 			delete(windowActiveAt, w)
+		}
+	}
+	for w := range windowTopic {
+		if !seenWindows[w] {
+			delete(windowTopic, w)
 		}
 	}
 }
@@ -329,6 +340,142 @@ func hasPromptText(promptSig string) bool {
 		return p != "" && p != "❯"
 	}
 	return false
+}
+
+const topicMaxRunes = 8
+
+var topicStopWords = map[string]struct{}{
+	"a": {}, "an": {}, "and": {}, "are": {}, "as": {}, "at": {}, "be": {}, "by": {},
+	"do": {}, "for": {}, "from": {}, "i": {}, "if": {}, "in": {}, "into": {}, "is": {},
+	"it": {}, "its": {}, "me": {}, "my": {}, "now": {}, "of": {}, "on": {}, "or": {},
+	"our": {}, "please": {}, "run": {}, "show": {}, "that": {}, "the": {}, "this": {},
+	"to": {}, "up": {}, "us": {}, "we": {}, "with": {}, "your": {},
+	"add": {}, "check": {}, "create": {}, "deploy": {}, "explain": {}, "fix": {},
+	"make": {}, "remove": {}, "summarize": {}, "update": {}, "write": {},
+	"thinking": {}, "planning": {}, "implementing": {}, "accomplishing": {},
+	"brewing": {}, "leavening": {}, "perusing": {}, "pondering": {}, "transfiguring": {},
+}
+
+func rememberWindowTopic(window string, paneCache map[string]*paneCapture) string {
+	content, ok := getPaneContent(window, paneCache)
+	if !ok {
+		return windowTopic[window]
+	}
+	topic := classifyPaneTopic(content)
+	if topic != "" {
+		windowTopic[window] = topic
+	}
+	return windowTopic[window]
+}
+
+func classifyPaneTopic(content string) string {
+	lines := strings.Split(content, "\n")
+	checked := 0
+	for i := len(lines) - 1; i >= 0 && checked < 24; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		checked++
+
+		if strings.HasPrefix(line, "› ") || line == "›" {
+			prompt := strings.TrimSpace(strings.TrimPrefix(line, "›"))
+			if topic := extractTopicWord(prompt); topic != "" {
+				return topic
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "❯ ") || line == "❯" {
+			prompt := strings.TrimSpace(strings.TrimPrefix(line, "❯"))
+			if topic := extractTopicWord(prompt); topic != "" {
+				return topic
+			}
+			continue
+		}
+		if hasActiveMarker(line) {
+			activity := line
+			if hasSpinnerMarker(activity) && len(activity) > 2 {
+				activity = strings.TrimSpace(activity[2:])
+			}
+			if cut := strings.Index(activity, " ("); cut > 0 {
+				activity = activity[:cut]
+			}
+			if topic := extractTopicWord(activity); topic != "" {
+				return topic
+			}
+		}
+	}
+	return ""
+}
+
+func extractTopicWord(text string) string {
+	for _, field := range strings.Fields(strings.ToLower(text)) {
+		if strings.HasPrefix(field, "/") && len(field) > 1 {
+			cmdTokens := tokenizeTopicWords(strings.TrimPrefix(field, "/"))
+			if len(cmdTokens) > 0 {
+				rawCmd := cmdTokens[0]
+				if _, skip := topicStopWords[rawCmd]; skip {
+					continue
+				}
+				cmd := trimTopic(rawCmd)
+				if cmd != "" && !isNumericWord(cmd) {
+					return cmd
+				}
+			}
+		}
+	}
+
+	for _, rawToken := range tokenizeTopicWords(strings.ToLower(text)) {
+		if rawToken == "" || isNumericWord(rawToken) {
+			continue
+		}
+		if _, skip := topicStopWords[rawToken]; skip {
+			continue
+		}
+		token := trimTopic(rawToken)
+		if token == "" || isNumericWord(token) {
+			continue
+		}
+		return token
+	}
+	return ""
+}
+
+func tokenizeTopicWords(text string) []string {
+	return strings.FieldsFunc(text, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+func trimTopic(token string) string {
+	token = strings.Trim(token, "_-.:,;!?()[]{}\"'`")
+	if token == "" {
+		return ""
+	}
+	r := []rune(token)
+	if len(r) > topicMaxRunes {
+		return string(r[:topicMaxRunes])
+	}
+	return token
+}
+
+func isNumericWord(word string) bool {
+	if word == "" {
+		return false
+	}
+	for _, r := range word {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func formatStatusWithTopic(status, topic string) string {
+	if status == "" || topic == "" {
+		return status
+	}
+	return status + " " + topic
 }
 
 // setWindowStatus applies hysteresis: a new status must be seen for
