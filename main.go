@@ -351,6 +351,7 @@ var topicStopWords = map[string]struct{}{
 	"our": {}, "please": {}, "run": {}, "show": {}, "that": {}, "the": {}, "this": {},
 	"to": {}, "up": {}, "us": {}, "we": {}, "with": {}, "your": {},
 	"app": {}, "page": {}, "file": {}, "issue": {}, "task": {},
+	"filename": {}, "codebase": {}, "change": {}, "changes": {}, "commit": {}, "commits": {}, "current": {},
 	"add": {}, "check": {}, "create": {}, "deploy": {}, "explain": {}, "fix": {},
 	"make": {}, "remove": {}, "summarize": {}, "update": {}, "write": {},
 	"clean": {}, "debug": {}, "improve": {}, "investigate": {}, "refactor": {},
