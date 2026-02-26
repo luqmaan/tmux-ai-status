@@ -12,6 +12,16 @@ import (
 )
 
 var (
+	listPanesOutput = func() ([]byte, error) {
+		return exec.Command("tmux", "list-panes", "-a",
+			"-F", "#{session_name}:#{window_index} #{pane_pid} #{window_active}").Output()
+	}
+	capturePaneOutput = func(window string) ([]byte, error) {
+		return exec.Command("tmux", "capture-pane", "-t", window, "-p").Output()
+	}
+)
+
+var (
 	// lastActive tracks when each window was last seen as active.
 	// Prevents flashing during spinner redraws.
 	lastActive   = make(map[string]time.Time)
@@ -58,8 +68,7 @@ var (
 )
 
 func listPanes() []paneInfo {
-	out, err := exec.Command("tmux", "list-panes", "-a",
-		"-F", "#{session_name}:#{window_index} #{pane_pid} #{window_active}").Output()
+	out, err := listPanesOutput()
 	if err != nil {
 		return nil
 	}
@@ -93,7 +102,7 @@ func getPaneContent(window string, cache map[string]*paneCapture) (string, bool)
 		return c.content, c.ok
 	}
 
-	out, err := exec.Command("tmux", "capture-pane", "-t", window, "-p").Output()
+	out, err := capturePaneOutput(window)
 	if err != nil {
 		cache[window] = &paneCapture{ok: false}
 		return "", false

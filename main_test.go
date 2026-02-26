@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -211,6 +212,79 @@ func TestReadPPID_Self(t *testing.T) {
 
 func TestListPanes_NoCrash(t *testing.T) {
 	_ = listPanes()
+}
+
+func TestListPanes_ParsesOutput(t *testing.T) {
+	orig := listPanesOutput
+	defer func() { listPanesOutput = orig }()
+
+	listPanesOutput = func() ([]byte, error) {
+		return []byte(
+			"s:1 123 1\n" +
+				"s:2 234 0\n" +
+				"badline\n" +
+				"s:3 nope 1\n",
+		), nil
+	}
+
+	got := listPanes()
+	if len(got) != 2 {
+		t.Fatalf("expected 2 parsed panes, got %d (%v)", len(got), got)
+	}
+	if got[0].window != "s:1" || got[0].pid != 123 || !got[0].focused {
+		t.Errorf("unexpected first pane: %+v", got[0])
+	}
+	if got[1].window != "s:2" || got[1].pid != 234 || got[1].focused {
+		t.Errorf("unexpected second pane: %+v", got[1])
+	}
+}
+
+func TestGetPaneContent_CachesSuccess(t *testing.T) {
+	orig := capturePaneOutput
+	defer func() { capturePaneOutput = orig }()
+
+	calls := 0
+	capturePaneOutput = func(window string) ([]byte, error) {
+		calls++
+		return []byte("hello"), nil
+	}
+
+	cache := map[string]*paneCapture{}
+	content, ok := getPaneContent("w:1", cache)
+	if !ok || content != "hello" {
+		t.Fatalf("expected first call success, got ok=%v content=%q", ok, content)
+	}
+	content, ok = getPaneContent("w:1", cache)
+	if !ok || content != "hello" {
+		t.Fatalf("expected cached success, got ok=%v content=%q", ok, content)
+	}
+	if calls != 1 {
+		t.Fatalf("expected capturePaneOutput called once, got %d", calls)
+	}
+}
+
+func TestGetPaneContent_CachesFailure(t *testing.T) {
+	orig := capturePaneOutput
+	defer func() { capturePaneOutput = orig }()
+
+	calls := 0
+	capturePaneOutput = func(window string) ([]byte, error) {
+		calls++
+		return nil, errors.New("boom")
+	}
+
+	cache := map[string]*paneCapture{}
+	content, ok := getPaneContent("w:2", cache)
+	if ok || content != "" {
+		t.Fatalf("expected first call failure, got ok=%v content=%q", ok, content)
+	}
+	content, ok = getPaneContent("w:2", cache)
+	if ok || content != "" {
+		t.Fatalf("expected cached failure, got ok=%v content=%q", ok, content)
+	}
+	if calls != 1 {
+		t.Fatalf("expected capturePaneOutput called once, got %d", calls)
+	}
 }
 
 func TestReadCmdline_NullBytes(t *testing.T) {
