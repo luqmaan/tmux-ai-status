@@ -372,15 +372,35 @@ func isPaneActive(window string) bool {
 
 // classifyPaneContent returns true if the pane content indicates active work.
 func classifyPaneContent(content string) bool {
-	if strings.Contains(content, "esc to interrupt") {
-		return true
-	}
-	// Claude's thinking spinner: "· Leavening… (54s · ...)" or "✢ Transfiguring…" or "* Perusing…"
-	// Match "ing…" or "ing..." — covers both with and without time parenthetical.
-	if strings.Contains(content, "ing\u2026") || strings.Contains(content, "ing...") {
-		return true
+	lines := strings.Split(content, "\n")
+	checked := 0
+	for i := len(lines) - 1; i >= 0 && checked < 12; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		checked++
+
+		if strings.Contains(line, "esc to interrupt") {
+			return true
+		}
+		if !hasSpinnerMarker(line) {
+			continue
+		}
+		// Claude/Codex spinner verbs: "Thinking…", "Brewing...", "Perusing…", etc.
+		if strings.Contains(line, "ing\u2026") || strings.Contains(line, "ing...") {
+			return true
+		}
 	}
 	return false
+}
+
+func hasSpinnerMarker(line string) bool {
+	return strings.HasPrefix(line, "· ") ||
+		strings.HasPrefix(line, "• ") ||
+		strings.HasPrefix(line, "✢ ") ||
+		strings.HasPrefix(line, "✻ ") ||
+		strings.HasPrefix(line, "* ")
 }
 
 // classifyPaneNeedsAttention returns true when the pane appears to be

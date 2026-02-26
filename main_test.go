@@ -215,6 +215,7 @@ func TestClassifyPaneContent_Idle(t *testing.T) {
 		{"codex idle", "Done.\n\n› Explain this codebase\n\n  gpt-5.3-codex · 87% left\n"},
 		{"codex worked", "─ Worked for 1m 51s ──────\n• Deployed.\n› \n"},
 		{"codex cogitated", "✻ Cogitated for 1m 27s\n❯ \n"},
+		{"prose contains ing dots", "Discussion summary...\nI am discussing...\n› Explain this codebase\n"},
 		{"empty", ""},
 		{"plain shell", "$ ls\nfile1\n$ \n"},
 	}
