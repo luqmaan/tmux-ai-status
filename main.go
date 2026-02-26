@@ -350,10 +350,33 @@ var topicStopWords = map[string]struct{}{
 	"it": {}, "its": {}, "me": {}, "my": {}, "now": {}, "of": {}, "on": {}, "or": {},
 	"our": {}, "please": {}, "run": {}, "show": {}, "that": {}, "the": {}, "this": {},
 	"to": {}, "up": {}, "us": {}, "we": {}, "with": {}, "your": {},
+	"app": {}, "page": {}, "file": {}, "issue": {}, "task": {},
 	"add": {}, "check": {}, "create": {}, "deploy": {}, "explain": {}, "fix": {},
 	"make": {}, "remove": {}, "summarize": {}, "update": {}, "write": {},
+	"clean": {}, "debug": {}, "improve": {}, "investigate": {}, "refactor": {},
+	"test": {}, "tests": {}, "work": {},
 	"thinking": {}, "planning": {}, "implementing": {}, "accomplishing": {},
 	"brewing": {}, "leavening": {}, "perusing": {}, "pondering": {}, "transfiguring": {},
+}
+
+var topicAlias = map[string]string{
+	"auth": "auth", "authentication": "auth", "authorize": "auth", "login": "auth", "signin": "auth", "oauth": "auth",
+	"nav": "nav", "navbar": "nav", "navigation": "nav",
+	"menu": "menu", "menus": "menu", "hamburger": "menu", "drawer": "menu",
+	"search": "search", "query": "search",
+	"shop": "shop", "checkout": "checkout", "cart": "cart", "payment": "payment", "shipping": "shipping",
+	"promo": "promo", "promotions": "promo", "campaign": "promo",
+	"image": "image", "images": "image", "photo": "image",
+	"parser": "parser", "scrape": "scrape", "crawler": "scrape",
+	"db": "db", "database": "db", "sql": "sql", "api": "api",
+	"cache": "cache", "redis": "cache",
+	"deploy": "deploy", "release": "deploy",
+}
+
+var topicPreferred = map[string]struct{}{
+	"auth": {}, "nav": {}, "menu": {}, "search": {}, "shop": {}, "promo": {},
+	"checkout": {}, "cart": {}, "payment": {}, "shipping": {},
+	"parser": {}, "scrape": {}, "db": {}, "api": {}, "cache": {}, "deploy": {},
 }
 
 func rememberWindowTopic(window string, paneCache map[string]*paneCapture) string {
@@ -409,36 +432,68 @@ func classifyPaneTopic(content string) string {
 }
 
 func extractTopicWord(text string) string {
-	for _, field := range strings.Fields(strings.ToLower(text)) {
+	lower := strings.ToLower(text)
+
+	for _, field := range strings.Fields(lower) {
 		if strings.HasPrefix(field, "/") && len(field) > 1 {
 			cmdTokens := tokenizeTopicWords(strings.TrimPrefix(field, "/"))
 			if len(cmdTokens) > 0 {
-				rawCmd := cmdTokens[0]
-				if _, skip := topicStopWords[rawCmd]; skip {
-					continue
-				}
-				cmd := trimTopic(rawCmd)
-				if cmd != "" && !isNumericWord(cmd) {
+				if cmd := normalizeTopicToken(cmdTokens[0]); cmd != "" {
 					return cmd
 				}
 			}
 		}
 	}
 
-	for _, rawToken := range tokenizeTopicWords(strings.ToLower(text)) {
-		if rawToken == "" || isNumericWord(rawToken) {
+	best := ""
+	bestScore := -1
+	tokens := tokenizeTopicWords(lower)
+	for i, rawToken := range tokens {
+		token := normalizeTopicToken(rawToken)
+		if token == "" {
 			continue
 		}
-		if _, skip := topicStopWords[rawToken]; skip {
-			continue
+		score := topicScore(rawToken, token, i, len(tokens))
+		if score > bestScore {
+			best = token
+			bestScore = score
 		}
-		token := trimTopic(rawToken)
-		if token == "" || isNumericWord(token) {
-			continue
-		}
-		return token
 	}
-	return ""
+	return best
+}
+
+func normalizeTopicToken(raw string) string {
+	raw = strings.ToLower(raw)
+	if raw == "" || isNumericWord(raw) {
+		return ""
+	}
+	if _, skip := topicStopWords[raw]; skip {
+		return ""
+	}
+	if alias, ok := topicAlias[raw]; ok {
+		return trimTopic(alias)
+	}
+	token := trimTopic(raw)
+	if token == "" || isNumericWord(token) {
+		return ""
+	}
+	return token
+}
+
+func topicScore(raw, token string, idx, total int) int {
+	score := len([]rune(token))
+	if _, ok := topicPreferred[token]; ok {
+		score += 7
+	}
+	if alias, ok := topicAlias[raw]; ok && alias == token {
+		score += 4
+	}
+	if strings.HasSuffix(raw, "ing") {
+		score -= 3
+	}
+	// Later words are often the specific noun ("header menu", "auth bug", etc).
+	score += idx * 2 / maxInt(total, 1)
+	return score
 }
 
 func tokenizeTopicWords(text string) []string {
@@ -469,6 +524,13 @@ func isNumericWord(word string) bool {
 		}
 	}
 	return true
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func formatStatusWithTopic(status, topic string) string {

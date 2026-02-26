@@ -436,7 +436,9 @@ func TestExtractTopicWord(t *testing.T) {
 	}{
 		{"slash command", "Run /review on my current changes", "review"},
 		{"hyphenated slash command", "/refresh-cover-images now", "refresh"},
-		{"skip generic verb", "Fix authentication bug in login", "authenti"},
+		{"prefer domain alias", "Fix authentication bug in login", "auth"},
+		{"prefer menu keyword", "Fix mobile header menu alignment", "menu"},
+		{"prefer nav alias", "Debug navigation collapse issue", "nav"},
 		{"active filler word", "Thinking...", ""},
 		{"numeric only", "12345", ""},
 	}
@@ -466,7 +468,7 @@ func TestClassifyPaneTopic(t *testing.T) {
 			name: "active line fallback",
 			content: "• Implementing normalization, filtering, and selection logic (2m 23s • esc to interrupt)\n" +
 				"› \n",
-			want: "normaliz",
+			want: "selectio",
 		},
 		{
 			name:    "bare prompt has no topic",
