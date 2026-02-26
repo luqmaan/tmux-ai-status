@@ -421,6 +421,67 @@ func TestUnreadReplacesIdle(t *testing.T) {
 	statusStateMu.Unlock()
 }
 
+func TestShouldMarkUnread(t *testing.T) {
+	tests := []struct {
+		name          string
+		wasWorking    bool
+		activity      bool
+		focused       bool
+		isWorking     bool
+		rawStatus     string
+		paneAttention bool
+		want          bool
+	}{
+		{
+			name:       "working to idle unfocused",
+			wasWorking: true, rawStatus: "x 💤", want: true,
+		},
+		{
+			name:     "tmux activity flag",
+			activity: true, rawStatus: "x 💤", want: true,
+		},
+		{
+			name:          "pay attention prompt",
+			paneAttention: true, rawStatus: "x 💤", want: true,
+		},
+		{
+			name:          "focused clears attention",
+			focused:       true,
+			paneAttention: true,
+			rawStatus:     "x 💤",
+			want:          false,
+		},
+		{
+			name:          "still working",
+			isWorking:     true,
+			paneAttention: true,
+			rawStatus:     "x 🧠",
+			want:          false,
+		},
+		{
+			name:      "empty status",
+			rawStatus: "",
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldMarkUnread(
+				tt.wasWorking,
+				tt.activity,
+				tt.focused,
+				tt.isWorking,
+				tt.rawStatus,
+				tt.paneAttention,
+			)
+			if got != tt.want {
+				t.Errorf("shouldMarkUnread() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // --- Benchmarks ---
 
 func BenchmarkBuildChildMap(b *testing.B) {

@@ -119,9 +119,16 @@ func updateAllPanes() {
 		focused := s.focused
 		wasWorking := windowWasWorking[window]
 		isWorking := isWorkingStatus(rawStatus)
+		paneAttention := false
+		if !focused && !isWorking && rawStatus != "" {
+			paneAttention = paneNeedsAttention(window)
+		}
 
-		// Transition: working → idle while unfocused OR tmux reports unseen activity.
-		if (wasWorking || s.activity) && !isWorking && !focused && rawStatus != "" {
+		// Mark unread when unfocused idle and either:
+		// - transitioned from working,
+		// - tmux reports unseen activity,
+		// - or pane is visibly waiting for user input (pay-attention prompt).
+		if shouldMarkUnread(wasWorking, s.activity, focused, isWorking, rawStatus, paneAttention) {
 			markUnread(window)
 		}
 		// User focused the window → clear unread
@@ -214,6 +221,13 @@ func isUnread(window string) bool {
 		return ws.unread
 	}
 	return false
+}
+
+func shouldMarkUnread(wasWorking, activity, focused, isWorking bool, rawStatus string, paneAttention bool) bool {
+	if focused || isWorking || rawStatus == "" {
+		return false
+	}
+	return wasWorking || activity || paneAttention
 }
 
 // setWindowStatus applies hysteresis: a new status must be seen for
