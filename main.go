@@ -42,24 +42,24 @@ func main() {
 }
 
 type paneInfo struct {
-	window   string
-	pid      int
-	focused  bool
-	activity bool
+	window  string
+	pid     int
+	focused bool
 }
 
 // Unread tracking: detect when agent finishes work while user isn't looking.
 var (
 	windowWasWorking = make(map[string]bool)
-	windowFocused    = make(map[string]bool)
 	windowSeen       = make(map[string]bool)
 	windowPromptSig  = make(map[string]string)
 	windowDoneSig    = make(map[string]string)
+	windowActiveSig  = make(map[string]string)
+	windowActiveAt   = make(map[string]time.Time)
 )
 
 func listPanes() []paneInfo {
 	out, err := exec.Command("tmux", "list-panes", "-a",
-		"-F", "#{session_name}:#{window_index} #{pane_pid} #{window_active} #{window_activity_flag}").Output()
+		"-F", "#{session_name}:#{window_index} #{pane_pid} #{window_active}").Output()
 	if err != nil {
 		return nil
 	}
@@ -67,7 +67,7 @@ func listPanes() []paneInfo {
 	sc := bufio.NewScanner(strings.NewReader(string(out)))
 	for sc.Scan() {
 		fields := strings.Fields(sc.Text())
-		if len(fields) < 4 {
+		if len(fields) < 3 {
 			continue
 		}
 		pid, err := strconv.Atoi(fields[1])
@@ -75,13 +75,33 @@ func listPanes() []paneInfo {
 			continue
 		}
 		panes = append(panes, paneInfo{
-			window:   fields[0],
-			pid:      pid,
-			focused:  fields[2] == "1",
-			activity: fields[3] == "1",
+			window:  fields[0],
+			pid:     pid,
+			focused: fields[2] == "1",
 		})
 	}
 	return panes
+}
+
+type paneCapture struct {
+	content string
+	ok      bool
+}
+
+func getPaneContent(window string, cache map[string]*paneCapture) (string, bool) {
+	if c, ok := cache[window]; ok {
+		return c.content, c.ok
+	}
+
+	out, err := exec.Command("tmux", "capture-pane", "-t", window, "-p").Output()
+	if err != nil {
+		cache[window] = &paneCapture{ok: false}
+		return "", false
+	}
+
+	content := string(out)
+	cache[window] = &paneCapture{content: content, ok: true}
+	return content, true
 }
 
 func updateAllPanes() {
@@ -92,24 +112,23 @@ func updateAllPanes() {
 
 	childMap := buildChildMap()
 	seenWindows := make(map[string]bool)
+	paneCache := make(map[string]*paneCapture)
 
 	// Group panes by window — pick the most significant status per window.
 	type windowSummary struct {
-		status   string
-		focused  bool
-		activity bool
+		status  string
+		focused bool
 	}
 	summaries := make(map[string]*windowSummary)
 
 	for _, p := range panes {
 		seenWindows[p.window] = true
-		rawStatus := getStatus(p.window, p.pid, childMap)
+		rawStatus := getStatus(p.window, p.pid, childMap, paneCache)
 		prev, exists := summaries[p.window]
 		if !exists {
-			summaries[p.window] = &windowSummary{status: rawStatus, focused: p.focused, activity: p.activity}
+			summaries[p.window] = &windowSummary{status: rawStatus, focused: p.focused}
 		} else {
 			prev.focused = prev.focused || p.focused
-			prev.activity = prev.activity || p.activity
 			if statusPriority(rawStatus) > statusPriority(prev.status) {
 				prev.status = rawStatus
 			}
@@ -126,7 +145,7 @@ func updateAllPanes() {
 		promptSig := ""
 		doneSig := ""
 		if !isWorking && rawStatus != "" {
-			promptSig, doneSig = paneSignals(window)
+			promptSig, doneSig = paneSignals(window, paneCache)
 		}
 		prevPromptSig := windowPromptSig[window]
 		prevDoneSig := windowDoneSig[window]
@@ -156,7 +175,6 @@ func updateAllPanes() {
 			clearUnread(window)
 		}
 
-		windowFocused[window] = focused
 		windowWasWorking[window] = isWorking
 		windowSeen[window] = true
 		windowPromptSig[window] = promptSig
@@ -193,11 +211,6 @@ func updateAllPanes() {
 			delete(windowWasWorking, w)
 		}
 	}
-	for w := range windowFocused {
-		if !seenWindows[w] {
-			delete(windowFocused, w)
-		}
-	}
 	for w := range windowSeen {
 		if !seenWindows[w] {
 			delete(windowSeen, w)
@@ -211,6 +224,16 @@ func updateAllPanes() {
 	for w := range windowDoneSig {
 		if !seenWindows[w] {
 			delete(windowDoneSig, w)
+		}
+	}
+	for w := range windowActiveSig {
+		if !seenWindows[w] {
+			delete(windowActiveSig, w)
+		}
+	}
+	for w := range windowActiveAt {
+		if !seenWindows[w] {
+			delete(windowActiveAt, w)
 		}
 	}
 }
@@ -367,7 +390,7 @@ func parsePPIDFromStat(stat string) int {
 	return ppid
 }
 
-func getStatus(window string, panePID int, childMap map[int][]int) string {
+func getStatus(window string, panePID int, childMap map[int][]int, paneCache map[string]*paneCapture) string {
 	agentPID, agentName := findAgent(panePID, childMap)
 	if agentPID == 0 {
 		return ""
@@ -407,41 +430,46 @@ func getStatus(window string, panePID int, childMap map[int][]int) string {
 	}
 
 	// If no child process is active, prompt means idle/waiting.
-	if paneNeedsAttention(window) {
+	if paneNeedsAttention(window, paneCache) {
 		return prefix + "💤"
 	}
-	if isPaneActive(window) {
+	if isPaneActive(window, paneCache) {
 		return prefix + "🧠"
 	}
 	return prefix + "💤"
 }
 
-func paneNeedsAttention(window string) bool {
-	out, err := exec.Command("tmux", "capture-pane", "-t", window, "-p").Output()
-	if err != nil {
+func paneNeedsAttention(window string, paneCache map[string]*paneCapture) bool {
+	content, ok := getPaneContent(window, paneCache)
+	if !ok {
 		return false
 	}
-	return classifyPaneNeedsAttention(string(out))
+	return classifyPaneNeedsAttention(content)
 }
 
-func paneSignals(window string) (promptSig, doneSig string) {
-	out, err := exec.Command("tmux", "capture-pane", "-t", window, "-p").Output()
-	if err != nil {
+func paneSignals(window string, paneCache map[string]*paneCapture) (promptSig, doneSig string) {
+	content, ok := getPaneContent(window, paneCache)
+	if !ok {
 		return "", ""
 	}
-	content := string(out)
 	return classifyPaneAttentionSignature(content), classifyPaneCompletionSignature(content)
 }
 
 // isPaneActive captures the pane content and checks for activity indicators.
 // Uses a grace period to prevent flashing during spinner redraws.
-func isPaneActive(window string) bool {
+func isPaneActive(window string, paneCache map[string]*paneCapture) bool {
 	now := time.Now()
 	active := false
 
-	out, err := exec.Command("tmux", "capture-pane", "-t", window, "-p").Output()
-	if err == nil {
-		active = classifyPaneContent(string(out))
+	if content, ok := getPaneContent(window, paneCache); ok {
+		active = classifyPaneContent(content)
+		if active {
+			active = !isStaleActiveMarker(window, content, now)
+		} else {
+			clearActiveMarker(window)
+		}
+	} else {
+		clearActiveMarker(window)
 	}
 
 	lastActiveMu.Lock()
@@ -460,6 +488,39 @@ func isPaneActive(window string) bool {
 		delete(lastActive, window)
 	}
 	return false
+}
+
+const staleActiveThreshold = 12 * time.Second
+
+func isStaleActiveMarker(window, content string, now time.Time) bool {
+	activeSig := classifyPaneActiveSignature(content)
+	if activeSig == "" {
+		return false
+	}
+	promptSig := detectPromptSignature(content)
+	if promptSig == "" {
+		windowActiveSig[window] = activeSig
+		windowActiveAt[window] = now
+		return false
+	}
+
+	prevSig, ok := windowActiveSig[window]
+	if !ok || prevSig != activeSig {
+		windowActiveSig[window] = activeSig
+		windowActiveAt[window] = now
+		return false
+	}
+	startedAt, ok := windowActiveAt[window]
+	if !ok {
+		windowActiveAt[window] = now
+		return false
+	}
+	return now.Sub(startedAt) >= staleActiveThreshold
+}
+
+func clearActiveMarker(window string) {
+	delete(windowActiveSig, window)
+	delete(windowActiveAt, window)
 }
 
 // classifyPaneContent returns true if the pane content indicates active work.
@@ -503,6 +564,22 @@ func hasActiveMarker(line string) bool {
 	return strings.Contains(line, "ing\u2026") || strings.Contains(line, "ing...")
 }
 
+func classifyPaneActiveSignature(content string) string {
+	lines := strings.Split(content, "\n")
+	checked := 0
+	for i := len(lines) - 1; i >= 0 && checked < 12; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		checked++
+		if hasActiveMarker(line) {
+			return line
+		}
+	}
+	return ""
+}
+
 // classifyPaneNeedsAttention returns true when the pane appears to be
 // waiting for user input (prompt visible) rather than actively working.
 func classifyPaneNeedsAttention(content string) bool {
@@ -513,6 +590,10 @@ func classifyPaneAttentionSignature(content string) string {
 	if classifyPaneContent(content) {
 		return ""
 	}
+	return detectPromptSignature(content)
+}
+
+func detectPromptSignature(content string) string {
 	lines := strings.Split(content, "\n")
 	checked := 0
 	for i := len(lines) - 1; i >= 0 && checked < 12; i-- {
@@ -551,16 +632,6 @@ func isCompletionLine(line string) bool {
 	return strings.HasPrefix(line, "─ Worked for ") ||
 		line == "Done." || strings.HasPrefix(line, "Done. ") ||
 		line == "All set." || strings.HasPrefix(line, "All set. ")
-}
-
-func isPromptWithText(line string) bool {
-	if strings.HasPrefix(line, "›") {
-		return strings.TrimSpace(strings.TrimPrefix(line, "›")) != ""
-	}
-	if strings.HasPrefix(line, "❯") {
-		return strings.TrimSpace(strings.TrimPrefix(line, "❯")) != ""
-	}
-	return false
 }
 
 func findAgent(panePID int, childMap map[int][]int) (int, string) {

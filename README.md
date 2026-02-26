@@ -1,94 +1,151 @@
 # tmux-ai-status
 
-A lightweight daemon that shows what your AI coding agent (Claude Code, Codex CLI) is doing right in your tmux tab names.
+A lightweight daemon that shows what your AI coding agent (Claude Code, Codex CLI) is doing directly in tmux window names.
 
 ```
- 1:🧠  2:🔨  3:💤  4:cx ⚙️  5:zsh
+1:x 🧠  2:x 🔨  3:x 💤  4:x 📬  5:zsh
 ```
+
+## Statuses
 
 | Emoji | Meaning |
 |-------|---------|
-| 🧠 | Agent is thinking (spinner visible) |
-| 💤 | Agent is idle / waiting for input |
-| 📬 | Agent finished work while you were in another tab (unread) |
-| 🔨 | Building (make, gcc, rustc, webpack, vite, ...) |
-| 🧪 | Testing (jest, pytest, vitest, mocha, ...) |
-| 📦 | Installing packages (npm, pip, apt, ...) |
-| 🔀 | Git operation |
-| 🌐 | Network request (curl, wget) |
-| ⚙️ | Other subprocess |
+| 🧠 | Agent is actively thinking/working |
+| 💤 | Agent is idle / waiting (already seen) |
+| 📬 | Unread: agent finished or needs your attention while unfocused |
+| 🔨 | Build/compile task |
+| 🧪 | Test task |
+| 📦 | Package install task |
+| 🔀 | Git task |
+| 🌐 | Network task |
+| ⚙️ | Other subprocess task |
 
-Codex CLI tabs get a `cx` prefix (e.g., `cx 🧠`).
+Prefixes:
+- `x ` for Codex tabs (example: `x 🧠`)
+- `c ` for Claude tabs (example: `c 🧠`)
 
-When no agent is detected, the tab reverts to the default process name (e.g., `zsh`).
+When no agent is detected, tmux automatic rename is restored (for example `zsh`).
 
-## How it works
+## Detection model
 
 Every 2 seconds the daemon:
 
-1. Lists all tmux panes and their shell PIDs
-2. Walks `/proc` to build a process tree, finding Claude/Codex agent processes (children or grandchildren of the shell)
-3. Inspects the agent's descendant processes to classify what tool is running
-4. If no subprocess is running, captures the tmux pane content to detect activity spinners (`Thinking…`, `Brewing…`, etc.) — distinguishing active thinking from idle
-5. Updates the tmux tab name with the appropriate emoji
+1. Lists tmux panes and shell PIDs.
+2. Walks `/proc` to find Claude/Codex under each pane shell.
+3. Uses **live descendant processes first** to classify status.
+4. Falls back to pane text only when no live worker child is active.
+5. Applies unread logic and updates the tmux window name.
 
-**Anti-flicker:** Two mechanisms prevent tab name flickering:
-- **Grace period (10s):** Once a pane is detected as active, it stays marked active for 10 seconds even if a spinner redraw causes a momentary blank frame
-- **Hysteresis (2 cycles / 4s):** A new status must be observed for 2 consecutive polling cycles before the tab name is actually updated, filtering out transient states
+### Why process-first
+
+This avoids the two failure modes we hit in practice:
+- Running in background but prompt visible: should still be active (`🧠`/`🔨`), not `💤`.
+- Old spinner text left in scrollback: should not keep tab stuck in `🧠` forever.
+
+### Unread (`📬`) rules
+
+A tab is marked unread only on meaningful unfocused transitions:
+- working → idle (completion), or
+- prompt/completion signature changes after initial baseline.
+
+Focusing the window clears unread.
+
+## Anti-flicker behavior
+
+- Active grace period: `10s` (`activeGrace`) to survive spinner redraw gaps.
+- Stale active marker decay: if the same active marker repeats with a visible prompt for `12s`, it is treated as stale and no longer forces `🧠`.
+- Status stability threshold: currently `1` cycle (fast updates).
 
 ## Requirements
 
-- Linux (reads `/proc` filesystem)
+- Linux (`/proc` access)
 - tmux
 - Go 1.22+ (build only)
 
 ## Install
 
 ```bash
-# Clone
 git clone https://github.com/donkeysrus/tmux-ai-status.git
 cd tmux-ai-status
-
-# Build & install
 make install
 ```
 
-This compiles the binary and copies it to `~/.local/bin/`.
+This builds `tmux-ai-status` and copies it to `~/.local/bin/tmux-ai-status`.
 
-### tmux configuration
+## Running options
 
-Add to your `~/.tmux.conf`:
+### Option A: tmux hook (simple)
+
+Add to `~/.tmux.conf`:
 
 ```tmux
-# Show AI agent status in tab names
 set-hook -g session-created 'run-shell -b "pgrep -f tmux-ai-status >/dev/null || ~/.local/bin/tmux-ai-status &"'
 ```
 
-Then reload tmux config:
+Reload tmux config:
 
 ```bash
 tmux source-file ~/.tmux.conf
 ```
 
-Or start it manually for a one-off test:
+### Option B: systemd user service (recommended)
+
+Create `~/.config/systemd/user/tmux-ai-status.service`:
+
+```ini
+[Unit]
+Description=tmux AI status daemon
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/tmux-ai-status-bin
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+```
+
+Enable + start:
 
 ```bash
-~/.local/bin/tmux-ai-status &
+systemctl --user daemon-reload
+systemctl --user enable --now tmux-ai-status.service
+```
+
+Check status/logs:
+
+```bash
+systemctl --user status tmux-ai-status.service
+journalctl --user -u tmux-ai-status.service -n 100 --no-pager
 ```
 
 ## Supported agents
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — detected by `claude` in the process cmdline
-- [Codex CLI](https://github.com/openai/codex) — detected by `codex` in the process cmdline
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+- [Codex CLI](https://github.com/openai/codex)
+
+## Tests
+
+```bash
+make test
+```
+
+The suite includes regressions for:
+- stale spinner vs prompt interactions,
+- process-first classification,
+- unread transition rules.
 
 ## Uninstall
 
 ```bash
 pkill -f tmux-ai-status
 rm ~/.local/bin/tmux-ai-status
+systemctl --user disable --now tmux-ai-status.service 2>/dev/null || true
+rm -f ~/.config/systemd/user/tmux-ai-status.service
+systemctl --user daemon-reload
 ```
-
-Remove the `set-hook` line from `~/.tmux.conf`.
 
 ## License
 

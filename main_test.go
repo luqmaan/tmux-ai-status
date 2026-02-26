@@ -122,7 +122,7 @@ func TestCollectDescendants_Empty(t *testing.T) {
 
 func TestGetStatus_NoAgent(t *testing.T) {
 	myPID := os.Getpid()
-	status := getStatus("fake:0", myPID, map[int][]int{myPID: {}})
+	status := getStatus("fake:0", myPID, map[int][]int{myPID: {}}, map[string]*paneCapture{})
 	if status != "" {
 		t.Errorf("expected empty status, got %q", status)
 	}
@@ -332,6 +332,44 @@ func TestClassifyPaneAttentionSignature(t *testing.T) {
 	}
 }
 
+func TestClassifyPaneActiveSignature(t *testing.T) {
+	content := "Done.\n\n◦ Planning broad tests and monitoring (1m 03s • esc to interrupt)\n› Find and fix a bug in @filename\n"
+	got := classifyPaneActiveSignature(content)
+	want := "◦ Planning broad tests and monitoring (1m 03s • esc to interrupt)"
+	if got != want {
+		t.Errorf("classifyPaneActiveSignature() = %q, want %q", got, want)
+	}
+}
+
+func TestDetectPromptSignature(t *testing.T) {
+	content := "Done.\n\n› Summarize recent commits\n\n  gpt-5.3-codex xhigh · 45% left\n"
+	got := detectPromptSignature(content)
+	want := "codex:› Summarize recent commits"
+	if got != want {
+		t.Errorf("detectPromptSignature() = %q, want %q", got, want)
+	}
+}
+
+func TestIsStaleActiveMarker(t *testing.T) {
+	window := "test:stale-active"
+	content := "◦ Planning broad tests and monitoring (1m 03s • esc to interrupt)\n› Find and fix a bug in @filename\n"
+
+	delete(windowActiveSig, window)
+	delete(windowActiveAt, window)
+	defer func() {
+		delete(windowActiveSig, window)
+		delete(windowActiveAt, window)
+	}()
+
+	now := time.Now()
+	if stale := isStaleActiveMarker(window, content, now); stale {
+		t.Error("first seen active marker should not be stale")
+	}
+	if stale := isStaleActiveMarker(window, content, now.Add(staleActiveThreshold+time.Second)); !stale {
+		t.Error("unchanged active marker with prompt should become stale")
+	}
+}
+
 func TestClassifyPaneCompletionSignature(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -376,7 +414,7 @@ func TestIsPaneActive_GracePeriod(t *testing.T) {
 	// isPaneActive calls tmux which won't have this window,
 	// so capture-pane fails → content check returns false.
 	// But grace period should still return true.
-	result := isPaneActive(window)
+	result := isPaneActive(window, map[string]*paneCapture{})
 	if !result {
 		t.Error("should return true during grace period even if capture fails")
 	}
@@ -395,7 +433,7 @@ func TestIsPaneActive_GraceExpired(t *testing.T) {
 	lastActive[window] = time.Now().Add(-activeGrace - time.Second)
 	lastActiveMu.Unlock()
 
-	result := isPaneActive(window)
+	result := isPaneActive(window, map[string]*paneCapture{})
 	if result {
 		t.Error("should return false after grace period expires")
 	}
@@ -414,7 +452,7 @@ func TestIsPaneActive_NoHistory(t *testing.T) {
 	delete(lastActive, window)
 	lastActiveMu.Unlock()
 
-	result := isPaneActive(window)
+	result := isPaneActive(window, map[string]*paneCapture{})
 	if result {
 		t.Error("should return false with no history and no content")
 	}
