@@ -267,6 +267,70 @@ func TestClassifyPaneNeedsAttention(t *testing.T) {
 	}
 }
 
+func TestClassifyPaneAttentionSignature(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name: "codex prompt with text",
+			content: "Done.\n\n› Explain this codebase\n" +
+				"  gpt-5.3-codex · 87% left\n",
+			want: "codex:› Explain this codebase",
+		},
+		{
+			name:    "claude bare prompt",
+			content: "All set.\n\n❯ \n",
+			want:    "claude:❯",
+		},
+		{
+			name:    "active spinner has no prompt signature",
+			content: "· Thinking… (5s · esc to interrupt)\n❯ \n",
+			want:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyPaneAttentionSignature(tt.content); got != tt.want {
+				t.Errorf("classifyPaneAttentionSignature(%q) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClassifyPaneCompletionSignature(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "codex worked marker",
+			content: "─ Worked for 2m 21s ─\n• Summary\n› Next task\n",
+			want:    "─ Worked for 2m 21s ─",
+		},
+		{
+			name:    "done line",
+			content: "Done.\n\n› Explain this codebase\n",
+			want:    "Done.",
+		},
+		{
+			name:    "no completion marker",
+			content: "Random output\n› prompt\n",
+			want:    "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyPaneCompletionSignature(tt.content); got != tt.want {
+				t.Errorf("classifyPaneCompletionSignature(%q) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
 // --- Debounce / grace period tests ---
 
 func TestIsPaneActive_GracePeriod(t *testing.T) {
@@ -425,11 +489,14 @@ func TestShouldMarkUnread(t *testing.T) {
 	tests := []struct {
 		name          string
 		wasWorking    bool
-		activity      bool
 		focused       bool
 		isWorking     bool
 		rawStatus     string
-		paneAttention bool
+		seenBefore    bool
+		promptSig     string
+		prevPromptSig string
+		doneSig       string
+		prevDoneSig   string
 		want          bool
 	}{
 		{
@@ -437,26 +504,48 @@ func TestShouldMarkUnread(t *testing.T) {
 			wasWorking: true, rawStatus: "x 💤", want: true,
 		},
 		{
-			name:     "tmux activity flag",
-			activity: true, rawStatus: "x 💤", want: true,
-		},
-		{
-			name:          "pay attention prompt",
-			paneAttention: true, rawStatus: "x 💤", want: true,
-		},
-		{
-			name:          "focused clears attention",
-			focused:       true,
-			paneAttention: true,
+			name:          "new prompt signature after baseline",
+			seenBefore:    true,
 			rawStatus:     "x 💤",
+			prevPromptSig: "codex:› old",
+			promptSig:     "codex:› new",
+			want:          true,
+		},
+		{
+			name:        "new completion signature after baseline",
+			seenBefore:  true,
+			rawStatus:   "x 💤",
+			prevDoneSig: "─ Worked for 1m 00s ─",
+			doneSig:     "─ Worked for 1m 10s ─",
+			want:        true,
+		},
+		{
+			name:       "first baseline prompt should not mark unread",
+			seenBefore: false,
+			rawStatus:  "x 💤",
+			promptSig:  "codex:› Explain this codebase",
+			want:       false,
+		},
+		{
+			name:          "unchanged signatures stay read",
+			seenBefore:    true,
+			rawStatus:     "x 💤",
+			promptSig:     "codex:› Explain this codebase",
+			prevPromptSig: "codex:› Explain this codebase",
 			want:          false,
 		},
 		{
-			name:          "still working",
-			isWorking:     true,
-			paneAttention: true,
-			rawStatus:     "x 🧠",
-			want:          false,
+			name:      "focused clears attention",
+			focused:   true,
+			rawStatus: "x 💤",
+			doneSig:   "Done.",
+			want:      false,
+		},
+		{
+			name:      "still working",
+			isWorking: true,
+			rawStatus: "x 🧠",
+			want:      false,
 		},
 		{
 			name:      "empty status",
@@ -469,11 +558,14 @@ func TestShouldMarkUnread(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := shouldMarkUnread(
 				tt.wasWorking,
-				tt.activity,
 				tt.focused,
 				tt.isWorking,
 				tt.rawStatus,
-				tt.paneAttention,
+				tt.seenBefore,
+				tt.promptSig,
+				tt.prevPromptSig,
+				tt.doneSig,
+				tt.prevDoneSig,
 			)
 			if got != tt.want {
 				t.Errorf("shouldMarkUnread() = %v, want %v", got, tt.want)

@@ -52,6 +52,9 @@ type paneInfo struct {
 var (
 	windowWasWorking = make(map[string]bool)
 	windowFocused    = make(map[string]bool)
+	windowSeen       = make(map[string]bool)
+	windowPromptSig  = make(map[string]string)
+	windowDoneSig    = make(map[string]string)
 )
 
 func listPanes() []paneInfo {
@@ -119,16 +122,29 @@ func updateAllPanes() {
 		focused := s.focused
 		wasWorking := windowWasWorking[window]
 		isWorking := isWorkingStatus(rawStatus)
-		paneAttention := false
-		if !focused && !isWorking && rawStatus != "" {
-			paneAttention = paneNeedsAttention(window)
+		seenBefore := windowSeen[window]
+		promptSig := ""
+		doneSig := ""
+		if !isWorking && rawStatus != "" {
+			promptSig, doneSig = paneSignals(window)
 		}
+		prevPromptSig := windowPromptSig[window]
+		prevDoneSig := windowDoneSig[window]
 
-		// Mark unread when unfocused idle and either:
-		// - transitioned from working,
-		// - tmux reports unseen activity,
-		// - or pane is visibly waiting for user input (pay-attention prompt).
-		if shouldMarkUnread(wasWorking, s.activity, focused, isWorking, rawStatus, paneAttention) {
+		// Mark unread only for meaningful events:
+		// - working -> idle completion while unfocused
+		// - new completion/prompt signature after initial baseline
+		if shouldMarkUnread(
+			wasWorking,
+			focused,
+			isWorking,
+			rawStatus,
+			seenBefore,
+			promptSig,
+			prevPromptSig,
+			doneSig,
+			prevDoneSig,
+		) {
 			markUnread(window)
 		}
 		// User focused the window → clear unread
@@ -142,6 +158,9 @@ func updateAllPanes() {
 
 		windowFocused[window] = focused
 		windowWasWorking[window] = isWorking
+		windowSeen[window] = true
+		windowPromptSig[window] = promptSig
+		windowDoneSig[window] = doneSig
 
 		// Replace 💤 with 📬 if unread
 		effectiveStatus := rawStatus
@@ -177,6 +196,21 @@ func updateAllPanes() {
 	for w := range windowFocused {
 		if !seenWindows[w] {
 			delete(windowFocused, w)
+		}
+	}
+	for w := range windowSeen {
+		if !seenWindows[w] {
+			delete(windowSeen, w)
+		}
+	}
+	for w := range windowPromptSig {
+		if !seenWindows[w] {
+			delete(windowPromptSig, w)
+		}
+	}
+	for w := range windowDoneSig {
+		if !seenWindows[w] {
+			delete(windowDoneSig, w)
 		}
 	}
 }
@@ -223,11 +257,28 @@ func isUnread(window string) bool {
 	return false
 }
 
-func shouldMarkUnread(wasWorking, activity, focused, isWorking bool, rawStatus string, paneAttention bool) bool {
+func shouldMarkUnread(
+	wasWorking, focused, isWorking bool,
+	rawStatus string,
+	seenBefore bool,
+	promptSig, prevPromptSig, doneSig, prevDoneSig string,
+) bool {
 	if focused || isWorking || rawStatus == "" {
 		return false
 	}
-	return wasWorking || activity || paneAttention
+	if wasWorking {
+		return true
+	}
+	if !seenBefore {
+		return false
+	}
+	if doneSig != "" && doneSig != prevDoneSig {
+		return true
+	}
+	if promptSig != "" && promptSig != prevPromptSig {
+		return true
+	}
+	return false
 }
 
 // setWindowStatus applies hysteresis: a new status must be seen for
@@ -367,6 +418,15 @@ func paneNeedsAttention(window string) bool {
 	return classifyPaneNeedsAttention(string(out))
 }
 
+func paneSignals(window string) (promptSig, doneSig string) {
+	out, err := exec.Command("tmux", "capture-pane", "-t", window, "-p").Output()
+	if err != nil {
+		return "", ""
+	}
+	content := string(out)
+	return classifyPaneAttentionSignature(content), classifyPaneCompletionSignature(content)
+}
+
 // isPaneActive captures the pane content and checks for activity indicators.
 // Uses a grace period to prevent flashing during spinner redraws.
 func isPaneActive(window string) bool {
@@ -432,26 +492,51 @@ func hasSpinnerMarker(line string) bool {
 // classifyPaneNeedsAttention returns true when the pane appears to be
 // waiting for user input (prompt visible) rather than actively working.
 func classifyPaneNeedsAttention(content string) bool {
-	if classifyPaneContent(content) {
-		return false
-	}
+	return classifyPaneAttentionSignature(content) != ""
+}
 
+func classifyPaneAttentionSignature(content string) string {
+	if classifyPaneContent(content) {
+		return ""
+	}
 	lines := strings.Split(content, "\n")
 	checked := 0
-	for i := len(lines) - 1; i >= 0 && checked < 8; i-- {
+	for i := len(lines) - 1; i >= 0 && checked < 12; i-- {
 		line := strings.TrimSpace(lines[i])
 		if line == "" {
 			continue
 		}
 		checked++
 		if strings.HasPrefix(line, "› ") || line == "›" {
-			return true
+			return "codex:" + line
 		}
 		if strings.HasPrefix(line, "❯ ") || line == "❯" {
-			return true
+			return "claude:" + line
 		}
 	}
-	return false
+	return ""
+}
+
+func classifyPaneCompletionSignature(content string) string {
+	lines := strings.Split(content, "\n")
+	checked := 0
+	for i := len(lines) - 1; i >= 0 && checked < 20; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		checked++
+		if strings.HasPrefix(line, "─ Worked for ") {
+			return line
+		}
+		if line == "Done." || strings.HasPrefix(line, "Done. ") {
+			return line
+		}
+		if line == "All set." || strings.HasPrefix(line, "All set. ") {
+			return line
+		}
+	}
+	return ""
 }
 
 func findAgent(panePID int, childMap map[int][]int) (int, string) {
