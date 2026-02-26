@@ -2,9 +2,29 @@
 
 A lightweight daemon that shows what your AI coding agent (Claude Code, Codex CLI) is doing directly in tmux window names.
 
+<p align="center">
+  <img src="docs/status-preview.png" alt="tmux tabs showing Codex and Claude status icons" width="920" />
+</p>
+<p align="center">
+  <em>Live pane activity + unread attention markers, directly in tmux window names.</em>
+</p>
+
 ```
 1:x 🧠  2:x 🔨  3:x 💤  4:x 📬  5:zsh
 ```
+
+## Why I use this
+
+I run tmux from my phone and keep lots of agent tabs open.
+
+Without this, every tab looks the same and I have to open each one to see what is happening.
+
+This tool gives each tab a simple status icon, so I can instantly see:
+- who is still working,
+- who is done,
+- which tab needs my attention.
+
+It works with both Codex and Claude, so I can switch between them and still get the same status system.
 
 ## Statuses
 
