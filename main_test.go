@@ -196,6 +196,14 @@ func TestClassifyPaneContent_Active(t *testing.T) {
 		{"accomplishing", "· Accomplishing… (1m 13s · ↓ 1.3k tokens · thought for 20s)\n❯ \n"},
 		{"bare spinner no parens", "* Perusing…\n\n──────\n❯ \n"},
 		{"bare spinner three dots", "· Thinking...\n❯ \n"},
+		{
+			"active spinner above prompt text",
+			"• Implementing normalization, filtering, and selection logic (2m 23s • esc to interrupt)\n" +
+				"\n" +
+				"› Run /review on my current changes\n" +
+				"\n" +
+				"  gpt-5.3-codex xhigh · 58% left · ~/content-magic-weaver\n",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -216,14 +224,6 @@ func TestClassifyPaneContent_Idle(t *testing.T) {
 		{"codex worked", "─ Worked for 1m 51s ──────\n• Deployed.\n› \n"},
 		{"codex cogitated", "✻ Cogitated for 1m 27s\n❯ \n"},
 		{"prose contains ing dots", "Discussion summary...\nI am discussing...\n› Explain this codebase\n"},
-		{
-			"stale spinner above prompt text",
-			"• Implementing normalization, filtering, and selection logic (2m 23s • esc to interrupt)\n" +
-				"\n" +
-				"› Run /review on my current changes\n" +
-				"\n" +
-				"  gpt-5.3-codex xhigh · 58% left · ~/content-magic-weaver\n",
-		},
 		{"empty", ""},
 		{"plain shell", "$ ls\nfile1\n$ \n"},
 	}

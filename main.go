@@ -460,18 +460,13 @@ func isPaneActive(window string) bool {
 func classifyPaneContent(content string) bool {
 	lines := strings.Split(content, "\n")
 	checked := 0
-	for i := len(lines) - 1; i >= 0 && checked < 4; i-- {
+	for i := len(lines) - 1; i >= 0 && checked < 12; i-- {
 		line := strings.TrimSpace(lines[i])
 		if line == "" {
 			continue
 		}
 		checked++
 
-		// Prompt with concrete text means we're waiting for user input now.
-		// Ignore older spinner lines above it.
-		if isPromptWithText(line) {
-			return false
-		}
 		// Explicit completion markers mean the run is done.
 		if isCompletionLine(line) {
 			return false
