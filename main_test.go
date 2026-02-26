@@ -227,6 +227,45 @@ func TestClassifyPaneContent_Idle(t *testing.T) {
 	}
 }
 
+func TestClassifyPaneNeedsAttention(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{
+			name: "codex waiting at prompt",
+			content: "Done.\n\n› Run /review on my current changes\n\n" +
+				"  gpt-5.3-codex · 87% left\n",
+			want: true,
+		},
+		{
+			name: "claude waiting at prompt",
+			content: "All set.\n\n❯ \n──────\n" +
+				"  🟢 19%\n",
+			want: true,
+		},
+		{
+			name:    "active spinner is not attention",
+			content: "· Thinking… (5s · esc to interrupt)\n❯ \n",
+			want:    false,
+		},
+		{
+			name:    "plain output",
+			content: "$ ls\nfile1\n$ \n",
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyPaneNeedsAttention(tt.content); got != tt.want {
+				t.Errorf("classifyPaneNeedsAttention(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
 // --- Debounce / grace period tests ---
 
 func TestIsPaneActive_GracePeriod(t *testing.T) {
@@ -294,10 +333,12 @@ func TestIsWorkingStatus(t *testing.T) {
 		{"🧠", true},
 		{"🔨", true},
 		{"⚙️", true},
-		{"cx 🧠", true},
-		{"cx 🔨", true},
+		{"x 🧠", true},
+		{"x 🔨", true},
+		{"c 🧠", true},
 		{"💤", false},
-		{"cx 💤", false},
+		{"c 💤", false},
+		{"x 💤", false},
 		{"", false},
 	}
 	for _, tt := range tests {
@@ -365,12 +406,12 @@ func TestUnreadReplacesIdle(t *testing.T) {
 	}
 
 	// Codex variant
-	status = "cx 💤"
+	status = "x 💤"
 	if isUnread(window) && strings.HasSuffix(status, "💤") {
 		status = strings.TrimSuffix(status, "💤") + "📬"
 	}
-	if status != "cx 📬" {
-		t.Errorf("expected cx 📬, got %q", status)
+	if status != "x 📬" {
+		t.Errorf("expected x 📬, got %q", status)
 	}
 
 	// Clean up

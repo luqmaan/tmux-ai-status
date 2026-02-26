@@ -300,9 +300,9 @@ func getStatus(window string, panePID int, childMap map[int][]int) string {
 		return ""
 	}
 
-	prefix := ""
+	prefix := "c "
 	if agentName == "codex" {
-		prefix = "cx "
+		prefix = "x "
 	}
 
 	descendants := collectDescendants(agentPID, childMap)
@@ -317,13 +317,28 @@ func getStatus(window string, panePID int, childMap map[int][]int) string {
 	}
 
 	if len(childNames) > 0 {
-		return prefix + classifyChildren(childNames)
+		childStatus := classifyChildren(childNames)
+		// Codex/Claude can have long-lived helper/background children.
+		// If status would be generic "⚙️" but pane is clearly waiting for input,
+		// show idle so unread/attention state can surface.
+		if childStatus == "⚙️" && paneNeedsAttention(window) {
+			return prefix + "💤"
+		}
+		return prefix + childStatus
 	}
 
 	if isPaneActive(window) {
 		return prefix + "🧠"
 	}
 	return prefix + "💤"
+}
+
+func paneNeedsAttention(window string) bool {
+	out, err := exec.Command("tmux", "capture-pane", "-t", window, "-p").Output()
+	if err != nil {
+		return false
+	}
+	return classifyPaneNeedsAttention(string(out))
 }
 
 // isPaneActive captures the pane content and checks for activity indicators.
@@ -364,6 +379,31 @@ func classifyPaneContent(content string) bool {
 	// Match "ing…" or "ing..." — covers both with and without time parenthetical.
 	if strings.Contains(content, "ing\u2026") || strings.Contains(content, "ing...") {
 		return true
+	}
+	return false
+}
+
+// classifyPaneNeedsAttention returns true when the pane appears to be
+// waiting for user input (prompt visible) rather than actively working.
+func classifyPaneNeedsAttention(content string) bool {
+	if classifyPaneContent(content) {
+		return false
+	}
+
+	lines := strings.Split(content, "\n")
+	checked := 0
+	for i := len(lines) - 1; i >= 0 && checked < 8; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		checked++
+		if strings.HasPrefix(line, "› ") || line == "›" {
+			return true
+		}
+		if strings.HasPrefix(line, "❯ ") || line == "❯" {
+			return true
+		}
 	}
 	return false
 }
