@@ -1,5 +1,3 @@
-# tmux-ai-status
-
 i run a ton of codex and claude code tabs at the same time in tmux and i got tired of switching tabs constantly to check on progress.. so now i have cute emojis tell me when an agent needs attention.
 
 ```
