@@ -1,9 +1,8 @@
 I run a ton of codex and claude code tabs at the same time in tmux. I got tired of switching tabs constantly to check on progress. Now I have emojis let me when an agent needs attention.
 
 ```
-1:x 🧠  2:c 🔨  3:x 💤  4:x 📬  5:zsh
-c = claude code
-x = codex
+| 1:x 🧠 | 2:c 🔨 | 3:x 💤 | 4:x 📬 | 5:zsh |
+c = claude code , x = codex
 ```
 
 <p align="center">
